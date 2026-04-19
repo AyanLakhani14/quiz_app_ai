@@ -12,6 +12,7 @@ class _QuizScreenState extends State<QuizScreen> {
   List questions = [];
   int currentIndex = 0;
   bool isLoading = true;
+  bool hasError = false;
 
   String? selectedAnswer;
   bool answered = false;
@@ -25,15 +26,37 @@ class _QuizScreenState extends State<QuizScreen> {
     loadQuestions();
   }
 
+  // LOAD QUESTIONS
   void loadQuestions() async {
-    final data = await TriviaService.fetchQuestions();
     setState(() {
-      questions = data;
-      isLoading = false;
-      setupQuestion();
+      isLoading = true;
+      hasError = false;
     });
+
+    try {
+      final data = await TriviaService.fetchQuestions();
+
+      setState(() {
+        questions = data;
+        isLoading = false;
+        setupQuestion();
+      });
+    } catch (e) {
+      setState(() {
+        isLoading = false;
+        hasError = true;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Failed to load questions. Check your internet."),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
+  // SETUP QUESTION
   void setupQuestion() {
     final q = questions[currentIndex];
 
@@ -48,6 +71,17 @@ class _QuizScreenState extends State<QuizScreen> {
     answered = false;
   }
 
+  // AI HINT
+  String generateHint(String question) {
+    if (question.toLowerCase().contains("python")) {
+      return "Think about Python syntax and common patterns.";
+    } else if (question.toLowerCase().contains("docker")) {
+      return "Focus on containerization concepts.";
+    }
+    return "Break the question into keywords and eliminate incorrect answers.";
+  }
+
+  // HANDLE ANSWER
   void selectAnswer(Map option) {
     if (answered) return;
 
@@ -60,9 +94,30 @@ class _QuizScreenState extends State<QuizScreen> {
       if (isCorrect) score++;
     });
 
+    if (isCorrect) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Correct!"),
+          duration: Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else {
+      final hint = generateHint(questions[currentIndex]['text']);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Hint: $hint"),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+
     Future.delayed(const Duration(seconds: 1), nextQuestion);
   }
 
+  // NEXT QUESTION
   void nextQuestion() {
     if (currentIndex < questions.length - 1) {
       setState(() {
@@ -74,12 +129,35 @@ class _QuizScreenState extends State<QuizScreen> {
     }
   }
 
+  // RESULTS WITH IMAGE
   void showResults() {
+    double percent = (score / questions.length) * 100;
+
+    String feedback;
+    if (percent >= 80) {
+      feedback = "🔥 Excellent!";
+    } else if (percent >= 50) {
+      feedback = "👍 Good job!";
+    } else {
+      feedback = "📚 Needs improvement.";
+    }
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Quiz Finished"),
-        content: Text("Score: $score / ${questions.length}"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset('assets/images/celebration.png', height: 100),
+            const SizedBox(height: 10),
+            Text(
+              "Score: $score / ${questions.length}\n"
+              "${percent.toStringAsFixed(0)}%\n\n$feedback",
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () {
@@ -101,6 +179,7 @@ class _QuizScreenState extends State<QuizScreen> {
     });
   }
 
+  // COLOR LOGIC
   Color getColor(Map option) {
     if (!answered) return Colors.white;
 
@@ -117,9 +196,31 @@ class _QuizScreenState extends State<QuizScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // LOADING IMAGE
     if (isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return Scaffold(
+        body: Center(
+          child: Image.asset('assets/images/loading.png', height: 120),
+        ),
+      );
+    }
+
+    // ERROR STATE
+    if (hasError) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text("Failed to load questions"),
+              const SizedBox(height: 10),
+              ElevatedButton(
+                onPressed: loadQuestions,
+                child: const Text("Retry"),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
@@ -135,11 +236,20 @@ class _QuizScreenState extends State<QuizScreen> {
               "Question ${currentIndex + 1}/${questions.length}",
               style: const TextStyle(fontSize: 18),
             ),
+
             const SizedBox(height: 10),
+
+            LinearProgressIndicator(
+              value: (currentIndex + 1) / questions.length,
+            ),
+
+            const SizedBox(height: 20),
+
             Text(
               q['text'] ?? '',
               style: const TextStyle(fontSize: 20),
             ),
+
             const SizedBox(height: 20),
 
             ...options.map((option) {
@@ -151,7 +261,34 @@ class _QuizScreenState extends State<QuizScreen> {
                     backgroundColor: getColor(option),
                   ),
                   onPressed: () => selectAnswer(option),
-                  child: Text(option['text']),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Flexible(child: Text(option['text'])),
+
+                      // ✔ CORRECT ICON
+                      if (answered && option['isCorrect'] == true)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 10),
+                          child: Image.asset(
+                            'assets/icons/correct.png',
+                            height: 20,
+                          ),
+                        ),
+
+                      // ❌ WRONG ICON
+                      if (answered &&
+                          option['text'] == selectedAnswer &&
+                          option['isCorrect'] != true)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 10),
+                          child: Image.asset(
+                            'assets/icons/wrong.png',
+                            height: 20,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               );
             }).toList(),
